@@ -10,6 +10,7 @@ module Market::house {
     use sui::table::{Table, Self};
     use sui::transfer;
     use sui::sui::SUI;
+    use sui::balance::{Self, Balance};
 
     use std::vector::{Self};
 
@@ -21,10 +22,10 @@ module Market::house {
     const EInvalidCap: u64 = 2;
 
     // shared object, one instance of house accepts only 1 type of coin for all listings
-    struct House<phantom COIN> has key {
+    struct House has key {
         id: UID,
         items: Bag,
-        payments: Table<address, Coin<COIN>>,
+        payments: Balance<SUI>,
         car_id: vector<ID> // For local test Delete me !! 
     }
 
@@ -44,15 +45,14 @@ module Market::house {
     }
     
     // create new houselist
-    public fun create<COIN>(ctx: &mut TxContext) : HouseCap {
+    public fun create(ctx: &mut TxContext) : HouseCap {
         let id = object::new(ctx);
         let inner_ = object::uid_to_inner(&id);
         let items = bag::new(ctx);
-        let payments = table::new<address, Coin<COIN>>(ctx);
-        transfer::share_object(House<COIN> { 
+        transfer::share_object(House { 
             id, 
             items,
-            payments,
+            payments: balance::zero(),
             car_id: vector::empty()
         });
         let cap = HouseCap {
@@ -71,8 +71,8 @@ module Market::house {
  * @param ask: u64 - Asking price for the item
  * @param ctx: &mut TxContext - Transaction context
  */
-    public entry fun list<T: key + store, COIN>(
-        house: &mut House<COIN>,
+    public entry fun list<T: key + store>(
+        house: &mut House,
         item: T,
         ask: u64,
         ctx: &mut TxContext
@@ -98,7 +98,7 @@ module Market::house {
  * @returns: T - Item associated with the listing
  */
     fun delist<T: key + store, COIN>(
-        house: &mut House<COIN>,
+        house: &mut House,
         item_id: ID,
         ctx: &mut TxContext
     ): T {
@@ -119,12 +119,12 @@ module Market::house {
      * @param paid: Coin<COIN> - Payment made for the item
      * @param ctx: &mut TxContext - Transaction context
      */
-    public entry fun delist_and_take<T: key + store, COIN>(
-        house: &mut House<COIN>,
+    public entry fun delist_and_take<T: key + store>(
+        house: &mut House,
         item_id: ID,
         ctx: &mut TxContext
     ) {
-        let item = delist<T, COIN>(house, item_id, ctx);
+        let item = delist<T, SUI>(house, item_id, ctx);
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
@@ -138,24 +138,15 @@ module Market::house {
      * @param paid: Coin<COIN> - Payment made for the item
      * @returns: T - Item associated with the listing
      */
-    fun buy<T: key + store, COIN>(
-        house: &mut House<COIN>,
+    fun buy<T: key + store>(
+        house: &mut House,
         item_id: ID,
-        paid: Coin<COIN>,
+        paid: Coin<SUI>,
     ): T {
         let Listing { id, ask, owner } = bag::remove(&mut house.items, item_id);
-
         assert!(ask == coin::value(&paid), EAmountIncorrect);
+        coin::put(&mut house.payments, paid);
 
-        
-        if (table::contains<address, Coin<COIN>>(&house.payments, owner)) {
-            coin::join(
-                table::borrow_mut<address, Coin<COIN>>(&mut house.payments, owner),
-                paid
-            )
-        } else {
-            table::add(&mut house.payments, owner, paid)
-        };
 
         let item = ofield::remove(&mut id, true);
         object::delete(id);
@@ -163,14 +154,14 @@ module Market::house {
     }
 
     
-    public entry fun buy_and_take<T: key + store, COIN>(
-        house: &mut House<COIN>,
+    public entry fun buy_and_take<T: key + store>(
+        house: &mut House,
         item_id: ID,
-        paid: Coin<COIN>,
+        paid: Coin<SUI>,
         ctx: &mut TxContext
     ) {
         transfer::public_transfer(
-            buy<T, COIN>(house, item_id, paid),
+            buy<T>(house, item_id, paid),
             tx_context::sender(ctx)
         )
     }
@@ -182,18 +173,19 @@ module Market::house {
      * @param ctx: &mut TxContext - Transaction context
      * @returns: Coin<COIN> - Profits collected
      */
-    public fun  take_profits<COIN>(
+    public fun  take_profits(
         cap: &HouseCap,
-        house: &mut House<COIN>,
+        house: &mut House,
         ctx: &mut TxContext
-    ): Coin<COIN> {
+    ): Coin<SUI> {
         assert!(object::id(house) == cap.house_id, EInvalidCap);
-        table::remove<address, Coin<COIN>>(&mut house.payments, tx_context::sender(ctx))
+        let balance_ = balance::withdraw_all(&mut house.payments);
+        let coin_ = coin::from_balance(balance_, ctx);
+        coin_
     }
 
     // For tests
-
-    public fun get_car_id(house: &House<SUI>) : ID {
+    public fun get_car_id(house: &House) : ID {
         let id_ = vector::borrow(&house.car_id, 0);
         *id_
     }
