@@ -27,7 +27,7 @@ module Market::test_house {
 
         next_tx(scenario, TEST_ADDRESS1);
         {
-            let cap = house::create<SUI>(ts::ctx(scenario));
+            let cap = house::create(ts::ctx(scenario));
             transfer::public_transfer(cap, ADMIN);
         };
 
@@ -39,7 +39,7 @@ module Market::test_house {
 
         next_tx(scenario, TEST_ADDRESS1);
         {
-            let house = ts::take_shared<House<SUI>>(scenario);
+            let house = ts::take_shared<House>(scenario);
             let item = ts::take_from_sender<Car>(scenario);
 
             house::list(&mut house, item, 1000, ts::ctx(scenario));
@@ -49,10 +49,10 @@ module Market::test_house {
 
         next_tx(scenario, TEST_ADDRESS1);
         {
-            let house = ts::take_shared<House<SUI>>(scenario);
+            let house = ts::take_shared<House>(scenario);
             let item_id = house::get_car_id(&house);
 
-            house::delist_and_take<Car, SUI>(&mut house, item_id, ts::ctx(scenario));
+            house::delist_and_take<Car>(&mut house, item_id, ts::ctx(scenario));
 
             ts::return_shared(house);
         };
@@ -68,7 +68,7 @@ module Market::test_house {
 
         next_tx(scenario, TEST_ADDRESS1);
         {
-            let cap = house::create<SUI>(ts::ctx(scenario));
+            let cap = house::create(ts::ctx(scenario));
             transfer::public_transfer(cap, TEST_ADDRESS1);  
         };
 
@@ -80,7 +80,7 @@ module Market::test_house {
 
         next_tx(scenario, TEST_ADDRESS1);
         {
-            let house = ts::take_shared<House<SUI>>(scenario);
+            let house = ts::take_shared<House>(scenario);
             let item = ts::take_from_sender<Car>(scenario);
 
             house::list(&mut house, item, 1000, ts::ctx(scenario));
@@ -90,20 +90,20 @@ module Market::test_house {
 
         next_tx(scenario, TEST_ADDRESS2);
         {
-            let house = ts::take_shared<House<SUI>>(scenario);
+            let house = ts::take_shared<House>(scenario);
             let item_id = house::get_car_id(&house);
             let coin_ = mint_for_testing<SUI>(1000, ts::ctx(scenario));
 
-            house::buy_and_take<Car, SUI>(&mut house, item_id, coin_, ts::ctx(scenario));
+            house::buy_and_take<Car>(&mut house, item_id, coin_, ts::ctx(scenario));
 
             ts::return_shared(house);
         };
 
         next_tx(scenario, TEST_ADDRESS1);
         {
-            let house = ts::take_shared<House<SUI>>(scenario);
+            let house = ts::take_shared<House>(scenario);
             let cap = ts::take_from_sender<HouseCap>(scenario);
-            let coin = house::take_profits<SUI>(&cap, &mut house, ts::ctx(scenario));
+            let coin = house::take_profits(&cap, &mut house, ts::ctx(scenario));
 
             transfer::public_transfer(coin, TEST_ADDRESS1);
 
