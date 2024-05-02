@@ -1,7 +1,6 @@
 module dacademarket::house {
 
-   // Importing required modules
-
+    // Importing required modules
     use sui::dynamic_object_field as ofield;
     use sui::tx_context::{Self, TxContext};
     use sui::object::{Self, ID, UID};
@@ -10,18 +9,20 @@ module dacademarket::house {
     use sui::table::{Table, Self};
     use sui::transfer;
 
-
     // Error constants
-
     const EAmountIncorrect: u64 = 0;
     const ENotOwner: u64 = 1;
+    const EInvalidListing: u64 = 2;
+    const ENoProfit: u64 = 3;
 
-    // shared object, one instance of house accepts only 1 type of coin for all listings
+    // House struct: Represents a marketplace for a specific coin type
+    // One instance of House accepts only one type of coin for all listings
     struct House<phantom COIN> has key {
         id: UID,
         items: Bag,
         payments: Table<address, Coin<COIN>>
     }
+
     // create new houselist
     public entry fun create<COIN>(ctx: &mut TxContext) {
         let id = object::new(ctx);
@@ -32,25 +33,26 @@ module dacademarket::house {
             items,
             payments
         })
-        
     }
-/**
- * Struct: Listing
- * Description: Represents a listing for an item.
- */
+
+    /**
+     * Struct: Listing
+     * Description: Represents a listing for an item.
+     */
     struct Listing has key, store {
         id: UID,
         ask: u64,
         owner: address
     }
-/**
- * Public entry function: list
- * Description: Lists an item for sale with a specified asking price.
- * @param houselist: &mut houselist<COIN> - Reference to the house list object
- * @param item: T - Item to list
- * @param ask: u64 - Asking price for the item
- * @param ctx: &mut TxContext - Transaction context
- */
+
+    /**
+     * Public entry function: list
+     * Description: Lists an item for sale with a specified asking price.
+     * @param house: &mut House<COIN> - Reference to the house list object
+     * @param item: T - Item to list
+     * @param ask: u64 - Asking price for the item
+     * @param ctx: &mut TxContext - Transaction context
+     */
     public entry fun list<T: key + store, COIN>(
         house: &mut House<COIN>,
         item: T,
@@ -69,21 +71,71 @@ module dacademarket::house {
     }
 
     /**
- * Function: delist
- * Description: Removes a listing and returns the item associated with it.
- * @param houselist: &mut houselist<COIN> - Reference to the house list object
- * @param item_id: ID - ID of the item to delist
- * @param ctx: &mut TxContext - Transaction context
- * @returns: T - Item associated with the listing
- */
+     * Function: delist
+     * Description: Removes a listing and returns the item associated with it.
+     * @param house: &mut House<COIN> - Reference to the house list object
+     * @param item_id: ID - ID of the item to delist
+     * @param ctx: &mut TxContext - Transaction context
+     * @returns: (bool, T) - A boolean indicating if the delisting was successful, and the item associated with the listing
+     */
     fun delist<T: key + store, COIN>(
         house: &mut House<COIN>,
         item_id: ID,
         ctx: &mut TxContext
-    ): T {
+    ): (bool, T) {
+        assert!(bag::contains(&house.items, item_id), EInvalidListing);
+
         let Listing { id, owner, ask: _ } = bag::remove(&mut house.items, item_id);
 
         assert!(tx_context::sender(ctx) == owner, ENotOwner);
+
+        let item = ofield::remove(&mut id, true);
+        object::delete(id);
+        (true, item)
+    }
+
+    /**
+     * Public entry function: delist_and_take
+     * Description: Removes a listing and transfers the associated item to the sender.
+     * @param house: &mut House<COIN> - Reference to the house list object
+     * @param item_id: ID - ID of the item to delist
+     * @param ctx: &mut TxContext - Transaction context
+     */
+    public entry fun delist_and_take<T: key + store, COIN>(
+        house: &mut House<COIN>,
+        item_id: ID,
+        ctx: &mut TxContext
+    ) {
+        let (success, item) = delist<T, COIN>(house, item_id, ctx);
+        if (success) {
+            transfer::public_transfer(item, tx_context::sender(ctx));
+        }
+    }
+
+    /**
+     * Function: buy
+     * Description: Purchases an item from the marketplace using a known listing.
+     * Payment is done in Coin<COIN>.
+     * @param house: &mut House<COIN> - Reference to the house marketplace
+     * @param item_id: ID - ID of the item to buy
+     * @param paid: Coin<COIN> - Payment made for the item
+     * @returns: T - Item associated with the listing
+     */
+    fun buy<T: key + store, COIN>(
+        house: &mut House<COIN>,
+        item_id: ID,
+        paid: Coin<COIN>,
+    ): T {
+        let Listing { id, ask, owner } = bag::remove(&mut house.items, item_id);
+
+        assert!(ask == coin::value(&paid), EAmountIncorrect);
+
+        if (table::contains<address, Coin<COIN>>(&house.payments, owner)) {
+            let owner_payment = table::borrow_mut<address, Coin<COIN>>(&mut house.payments, owner);
+            coin::join(owner_payment, paid);
+        } else {
+            table::add(&mut house.payments, owner, paid);
+        };
 
         let item = ofield::remove(&mut id, true);
         object::delete(id);
@@ -98,50 +150,6 @@ module dacademarket::house {
      * @param paid: Coin<COIN> - Payment made for the item
      * @param ctx: &mut TxContext - Transaction context
      */
-    public entry fun delist_and_take<T: key + store, COIN>(
-        house: &mut House<COIN>,
-        item_id: ID,
-        ctx: &mut TxContext
-    ) {
-        let item = delist<T, COIN>(house, item_id, ctx);
-        transfer::public_transfer(item, tx_context::sender(ctx));
-    }
-
-     /**
-     * Function: buy
-     * Description: Purchases an item from the marketplace using a known listing.
-     * Payment is done in Coin<COIN>.
-     * If conditions are correct, the owner of the item gets the payment and the buyer receives the item.
-     * @param House: &mut House<COIN> - Reference to the house marketplace
-     * @param item_id: ID - ID of the item to buy
-     * @param paid: Coin<COIN> - Payment made for the item
-     * @returns: T - Item associated with the listing
-     */
-    fun buy<T: key + store, COIN>(
-        house: &mut House<COIN>,
-        item_id: ID,
-        paid: Coin<COIN>,
-    ): T {
-        let Listing { id, ask, owner } = bag::remove(&mut house.items, item_id);
-
-        assert!(ask == coin::value(&paid), EAmountIncorrect);
-
-        
-        if (table::contains<address, Coin<COIN>>(&house.payments, owner)) {
-            coin::join(
-                table::borrow_mut<address, Coin<COIN>>(&mut house.payments, owner),
-                paid
-            )
-        } else {
-            table::add(&mut house.payments, owner, paid)
-        };
-
-        let item = ofield::remove(&mut id, true);
-        object::delete(id);
-        item
-    }
-
-    
     public entry fun buy_and_take<T: key + store, COIN>(
         house: &mut House<COIN>,
         item_id: ID,
@@ -159,21 +167,36 @@ module dacademarket::house {
      * Description: Takes profits from selling items on the marketplace.
      * @param house: &mut House<COIN> - Reference to the house listing marketplace
      * @param ctx: &mut TxContext - Transaction context
-     * @returns: Coin<COIN> - Profits collected
+     * @returns: (bool, Coin<COIN>) - A boolean indicating if the sender had profits, and the collected profits
      */
     fun take_profits<COIN>(
         house: &mut House<COIN>,
         ctx: &mut TxContext
-    ): Coin<COIN> {
-        table::remove<address, Coin<COIN>>(&mut house.payments, tx_context::sender(ctx))
+    ): (bool, Coin<COIN>) {
+        let sender = tx_context::sender(ctx);
+        if (table::contains<address, Coin<COIN>>(&house.payments, sender)) {
+            (true, table::remove<address, Coin<COIN>>(&mut house.payments, sender))
+        } else {
+            (false, Coin {})
+        }
     }
 
-    
+    /**
+     * Public entry function: take_profits_and_keep
+     * Description: Takes profits from selling items on the marketplace and transfers them to the sender.
+     * @param house: &mut House<COIN> - Reference to the house listing marketplace
+     * @param ctx: &mut TxContext - Transaction context
+     */
     public entry fun take_profits_and_keep<COIN>(
         house: &mut House<COIN>,
         ctx: &mut TxContext
     ) {
-        transfer::public_transfer(take_profits(house, ctx), tx_context::sender(ctx))
-    }
-
+        let (has_profit, profits) = take_profits(house, ctx);
+        if (has_profit) {
+            transfer::public_transfer(profits, tx_context::sender
+   (profits, tx_context::sender(ctx));
+   } else {
+   // Handle the case where the sender has no profits
+   }
+}
 }
