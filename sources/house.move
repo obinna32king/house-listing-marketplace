@@ -1,4 +1,4 @@
-module dacademarket::house {
+module Market::house {
 
    // Importing required modules
 
@@ -9,40 +9,60 @@ module dacademarket::house {
     use sui::bag::{Bag, Self};
     use sui::table::{Table, Self};
     use sui::transfer;
+    use sui::sui::SUI;
+
+    use std::vector::{Self};
 
 
     // Error constants
 
     const EAmountIncorrect: u64 = 0;
     const ENotOwner: u64 = 1;
+    const EInvalidCap: u64 = 2;
 
     // shared object, one instance of house accepts only 1 type of coin for all listings
     struct House<phantom COIN> has key {
         id: UID,
         items: Bag,
-        payments: Table<address, Coin<COIN>>
+        payments: Table<address, Coin<COIN>>,
+        car_id: vector<ID> // For local test Delete me !! 
     }
-    // create new houselist
-    public entry fun create<COIN>(ctx: &mut TxContext) {
-        let id = object::new(ctx);
-        let items = bag::new(ctx);
-        let payments = table::new<address, Coin<COIN>>(ctx);
-        transfer::share_object(House<COIN> { 
-            id, 
-            items,
-            payments
-        })
-        
+
+    struct HouseCap has key, store {
+        id: UID,
+        house_id: ID
     }
-/**
- * Struct: Listing
- * Description: Represents a listing for an item.
- */
+
+    /**
+    * Struct: Listing
+    * Description: Represents a listing for an item.
+    */
     struct Listing has key, store {
         id: UID,
         ask: u64,
         owner: address
     }
+    
+    // create new houselist
+    public fun create<COIN>(ctx: &mut TxContext) : HouseCap {
+        let id = object::new(ctx);
+        let inner_ = object::uid_to_inner(&id);
+        let items = bag::new(ctx);
+        let payments = table::new<address, Coin<COIN>>(ctx);
+        transfer::share_object(House<COIN> { 
+            id, 
+            items,
+            payments,
+            car_id: vector::empty()
+        });
+        let cap = HouseCap {
+            id: object::new(ctx),
+            house_id: inner_
+        };
+        cap
+
+    }
+
 /**
  * Public entry function: list
  * Description: Lists an item for sale with a specified asking price.
@@ -58,6 +78,7 @@ module dacademarket::house {
         ctx: &mut TxContext
     ) {
         let item_id = object::id(&item);
+        vector::push_back(&mut house.car_id, item_id); // for access car id Delete me !! 
         let listing = Listing {
             id: object::new(ctx),
             ask: ask,
@@ -161,19 +182,20 @@ module dacademarket::house {
      * @param ctx: &mut TxContext - Transaction context
      * @returns: Coin<COIN> - Profits collected
      */
-    fun take_profits<COIN>(
+    public fun  take_profits<COIN>(
+        cap: &HouseCap,
         house: &mut House<COIN>,
         ctx: &mut TxContext
     ): Coin<COIN> {
+        assert!(object::id(house) == cap.house_id, EInvalidCap);
         table::remove<address, Coin<COIN>>(&mut house.payments, tx_context::sender(ctx))
     }
 
-    
-    public entry fun take_profits_and_keep<COIN>(
-        house: &mut House<COIN>,
-        ctx: &mut TxContext
-    ) {
-        transfer::public_transfer(take_profits(house, ctx), tx_context::sender(ctx))
+    // For tests
+
+    public fun get_car_id(house: &House<SUI>) : ID {
+        let id_ = vector::borrow(&house.car_id, 0);
+        *id_
     }
 
 }
